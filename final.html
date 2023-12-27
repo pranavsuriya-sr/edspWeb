@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Recorder and Plotter</title>
+    <style>
+        body {
+            
+            text-align: center;
+            padding: 20px;
+
+            background: #2c3e50;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 16px;
+        }
+        canvas {
+            border: 1px solid #fff;
+            margin-top: 20px;
+        }
+        button, .design2 {
+  box-sizing: border-box;
+  -webkit-appearance: none;
+     -moz-appearance: none;
+          appearance: none;
+  background-color: transparent;
+  border: 2px solid #e74c3c;
+  border-radius: 0.6em;
+  color: #e74c3c;
+  cursor: pointer;
+  display: flex;
+  align-self: center;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1;
+  margin: 20px;
+  padding: 1.2em 2.8em;
+  text-decoration: none;
+  text-align: center;
+  text-transform: uppercase;
+  font-family: "Montserrat", sans-serif;
+  font-weight: 700;
+}
+button:hover, button:focus {
+  color: #fff;
+  outline: 0;
+}
+
+.first {
+  transition: box-shadow 300ms ease-in-out, color 300ms ease-in-out;
+}
+.first:hover {
+  box-shadow: 0 0 40px 40px #e74c3c inset;
+}
+
+    </style>
+</head>
+<body>
+    <h1 style="color: #fff;">Audio Recorder and Analyser</h1>
+    
+    <div>
+        <button onclick="startRecording()" class = "first">Start Recording</button>
+        <button onclick="stopRecording()" class = "first" style="margin-left: 600px; margin-top: -80px;">Stop Recording</button>
+        <button onclick="playAudio()" class = "design1" style="margin-left: 1200px; margin-top: -80px;">Play Audio</button>
+        <input type="file" accept="audio/*" class = "first design2" style="margin-left: 520px;" id="fileInput" onchange="handleFile()" />
+    </div>
+
+    
+    <canvas id="waveform" width="600" height="200"></canvas>
+    <canvas id="spectrum" width="600" height="200"></canvas>
+
+    <div>
+        <input type="file" id="file2Input2" accept="audio/*" / class = "first design2" style="margin-left: 980px;">
+    <button id="startButton2" style="margin-top: -80px;">Start Recording</button>
+    <button id="deleteButton2" style="display: none;">Delete Audio</button>
+    </div>
+    
+    <canvas id="graphCanvas2" width="600" height="200"></canvas>
+    <canvas id="frequencyCanvas2" width="600" height="200"></canvas>
+
+
+    <script>
+        let audioContext;
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioBuffer;
+        let source;
+
+        function startRecording() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then((stream) => {
+                    audioContext = new AudioContext();
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.ondataavailable = handleDataAvailable;
+                    mediaRecorder.onstop = handleStop;
+                    audioChunks = [];
+                    mediaRecorder.start();
+                })
+                .catch((error) => console.error('Error accessing microphone:', error));
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
+        }
+
+        function handleDataAvailable(event) {
+            if (event.data.size > 0) {
+                audioChunks.push(event.data);
+            }
+        }
+
+        function handleStop() {
+            const blob = new Blob(audioChunks, { type: 'audio/wav' });
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                audioContext.decodeAudioData(
+                    e.target.result,
+                    (buffer) => {
+                        audioBuffer = buffer;
+                        drawWaveform(buffer.getChannelData(0));
+                        drawSpectrum(buffer.getChannelData(0));
+                    },
+                    (error) => console.error('Error decoding audio data:', error)
+                );
+            };
+            reader.readAsArrayBuffer(blob);
+        }
+
+        function drawWaveform(data) {
+    const canvas = document.getElementById('waveform');
+    const context = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    const amplitudeRange = 1.0; // Assuming the amplitude range is from -1 to 1
+
+    context.clearRect(0, 0, width, height);
+    context.beginPath();
+    context.moveTo(0, height / 2);
+
+    for (let i = 0; i < data.length; i++) {
+        const x = (i / data.length) * width;
+        const time = (i / data.length) * (data.length / audioContext.sampleRate);
+        const y = (0.5 + 0.5 * data[i]) * height;
+
+        context.lineTo(x, y);
+
+        // Add time scale every 1 second
+        if (i % Math.floor(audioContext.sampleRate) === 0) {
+            context.fillText(time.toFixed(1) + 's', x, height - 5);
+        }
+    }
+
+    // Draw amplitude scale
+    context.font = '12px Arial';
+    context.fillStyle = '#000000';
+    context.textAlign = 'right';
+    context.textBaseline = 'middle';
+    
+    for (let i = 0; i <= 1; i += 0.5) {
+        const y = height - i * height;
+        context.fillText((i * amplitudeRange).toFixed(1), width - 5, y);
+    }
+
+    context.strokeStyle = '#2196F3';
+    context.lineWidth = 2;
+    context.stroke();
+}
+
+
+function drawSpectrum(data) {
+    const canvas = document.getElementById('spectrum');
+    const context = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Calculate FFT
+    const fftSize = 2048;
+    const bufferLength = audioContext.sampleRate / 2;
+    const fft = new FFT(fftSize, audioContext.sampleRate);
+
+    const spectrum = fft.process(data);
+
+    // Normalize spectrum values
+    const maxSpectrumValue = Math.max(...spectrum);
+    const normalizedSpectrum = spectrum.map(value => value / maxSpectrumValue);
+
+    // Draw spectrum
+    context.clearRect(0, 0, width, height);
+    context.beginPath();
+
+    for (let i = 0; i < normalizedSpectrum.length; i++) {
+        const x = (i / normalizedSpectrum.length) * width;
+        const frequency = (i / normalizedSpectrum.length) * (audioContext.sampleRate / 2);
+        const y = (1 - normalizedSpectrum[i]) * height; // Invert the y-axis for better visualization
+
+        context.lineTo(x, y);
+
+        // Add frequency scale every 1000 Hz
+        if (i % 1000 === 0) {
+            context.fillText(frequency.toFixed(0) + 'Hz', x, height - 5);
+        }
+    }
+
+    // Draw amplitude scale
+    context.font = '12px Arial';
+    context.fillStyle = '#000000';
+    context.textAlign = 'right';
+    context.textBaseline = 'middle';
+    
+    for (let i = 0; i <= 1; i += 0.5) {
+        const y = height - i * height;
+        context.fillText((i * maxSpectrumValue).toFixed(1), width - 5, y);
+    }
+
+    context.strokeStyle = '#FF0000';
+    context.lineWidth = 2;
+    context.stroke();
+}
+
+
+        function playAudio() {
+            if (audioBuffer) {
+                source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+                source.start();
+            }
+        }
+
+        function handleFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            const reader = new FileReader();
+
+            reader.onload = function (e) {
+                const arrayBuffer = e.target.result;
+
+                audioContext.decodeAudioData(
+                    arrayBuffer,
+                    (buffer) => {
+                        audioBuffer = buffer;
+                        drawWaveform(buffer.getChannelData(0));
+                        drawSpectrum(buffer.getChannelData(0));
+                    },
+                    (error) => console.error('Error decoding audio data:', error)
+                );
+            };
+
+            reader.onerror = function (error) {
+                console.error('Error reading file:', error);
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        // FFT implementation (from https://github.com/corbanbrook/dsp.js)
+        class FFT {
+            constructor(bufferSize, sampleRate) {
+                this.bufferSize = bufferSize;
+                this.sampleRate = sampleRate;
+                this.spectrum = new Float32Array(bufferSize / 2);
+                this.real = new Float32Array(bufferSize);
+                this.imag = new Float32Array(bufferSize);
+
+                this.reverseTable = new Uint32Array(bufferSize);
+
+                let limit = 1;
+                let bit = bufferSize >> 1;
+
+                while (limit < bufferSize) {
+                    for (let i = 0; i < limit; i++) {
+                        this.reverseTable[i + limit] = this.reverseTable[i] + bit;
+                    }
+
+                    limit <<= 1;
+                    bit >>= 1;
+                }
+            }
+
+            process(buffer) {
+                // Bit-reversed addressing permutation
+                for (let i = 0; i < this.bufferSize; i++) {
+                    const j = this.reverseTable[i];
+
+                    this.real[i] = buffer[j];
+                    this.imag[i] = 0.0;
+                }
+
+                // Cooley-Tukey decimation-in-time radix-2 FFT
+                for (let size = 2; size <= this.bufferSize; size <<= 1) {
+                    const halfsize = size >> 1;
+                    const tablestep = this.bufferSize / size;
+
+                    for (let i = 0; i < this.bufferSize; i += size) {
+                        for (let j = i, k = 0; j < i + halfsize; j++, k += tablestep) {
+                            const tpre = this.real[j + halfsize] * Math.cos(k * Math.PI / this.bufferSize) +
+                                         this.imag[j + halfsize] * Math.sin(k * Math.PI / this.bufferSize);
+
+                            const tpim = -this.real[j + halfsize] * Math.sin(k * Math.PI / this.bufferSize) +
+                                          this.imag[j + halfsize] * Math.cos(k * Math.PI / this.bufferSize);
+
+                            const tR = this.real[j];
+                            const tI = this.imag[j];
+
+                            this.real[j] += tpre;
+                            this.imag[j] += tpim;
+
+                            this.real[j + halfsize] = tR - tpre;
+                            this.imag[j + halfsize] = tI - tpim;
+                        }
+                    }
+                }
+
+                // Magnitude
+                for (let i = 0; i < this.bufferSize / 2; i++) {
+                    this.spectrum[i] = Math.sqrt(this.real[i] * this.real[i] + this.imag[i] * this.imag[i]);
+                }
+
+                return this.spectrum;
+            }
+        }
+    </script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const file2Input2 = document.getElementById('file2Input2');
+        const startButton2 = document.getElementById('startButton2');
+        const deleteButton2 = document.getElementById('deleteButton2');
+        const graphCanvas2 = document.getElementById('graphCanvas2');
+        const frequencyCanvas2 = document.getElementById('frequencyCanvas2');
+        const canvasContext = graphCanvas2.getContext('2d');
+        const frequencyContext = frequencyCanvas2.getContext('2d');
+        let isRecording = false;
+        let audioContext, mediaRecorder, analyser, audioElement;
+
+        file2Input2.addEventListener('change', handleFile2Select2);
+
+        startButton2.addEventListener('click', () => {
+            if (!isRecording) {
+                startRecording2();
+                startButton2.textContent = 'Stop Recording';
+            } else {
+                stopRecording2();
+                startButton2.textContent = 'Start Recording';
+                deleteButton2.style.display = 'inline'; // Show delete button
+            }
+            isRecording = !isRecording;
+        });
+
+        deleteButton2.addEventListener('click', () => {
+            if (audioElement) {
+                audioElement.pause();
+                audioElement.parentNode.removeChild(audioElement);
+                deleteButton2.style.display = 'none'; // Hide delete button
+                // Clear canvases
+                canvasContext.clearRect(0, 0, graphCanvas2.width, graphCanvas2.height);
+                frequencyContext.clearRect(0, 0, frequencyCanvas2.width, frequencyCanvas2.height);
+            }
+        });
+
+        function handleFile2Select2(event) {
+const file2 = event.target.files[0];
+
+if (file2) {
+    const audioUrl2 = URL.createObjectURL(file2);
+
+    audioElement = new Audio(audioUrl2);
+    audioElement.controls = true;
+    document.body.appendChild(audioElement);
+
+    drawWaveform2(audioUrl2);
+}
+}
+
+        function startRecording2() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then((stream) => {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 256;
+
+                    const microphone = audioContext.createMediaStreamSource(stream);
+                    microphone.connect(analyser);
+
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.ondataavailable = handleDataAvailable;
+                    mediaRecorder.onstop = () => audioContext.close();
+
+                    mediaRecorder.start();
+                })
+                .catch((error) => {
+                    console.error('Error accessing microphone:', error);
+                });
+        }
+
+        function stopRecording2() {
+            if (mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
+        }
+
+        function handleDataAvailable(event) {
+            if (event.data.size > 0) {
+                const audioBlob2 = new Blob([event.data], { type: 'audio/wav' });
+                const audioUrl2 = URL.createObjectURL(audioBlob2);
+
+                audioElement = new Audio(audioUrl2);
+                audioElement.controls = true;
+                document.body.appendChild(audioElement);
+
+                drawWaveform2(audioUrl2);
+            }
+        }
+
+        function drawWaveform2(audioUrl2) {
+const audio = new Audio(audioUrl2);
+const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+const source = audioContext.createMediaElementSource(audio);
+const analyser = audioContext.createAnalyser();
+
+source.connect(analyser);
+analyser.connect(audioContext.destination);
+
+analyser.fftSize = 256;
+const bufferLength = analyser.frequencyBinCount;
+const dataArray = new Uint8Array(bufferLength);
+
+canvasContext.clearRect(0, 0, graphCanvas2.width, graphCanvas2.height);
+
+function draw() {
+    analyser.getByteTimeDomainData(dataArray);
+
+    canvasContext.lineWidth = 2;
+    canvasContext.strokeStyle = '#3498db'; // Waveform color
+    canvasContext.beginPath();
+
+    const sliceWidth = graphCanvas2.width * 1.0 / bufferLength;
+    let x = 0;
+
+    for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = v * graphCanvas2.height / 2;
+
+        if (i === 0) {
+            canvasContext.moveTo(x, y);
+        } else {
+            canvasContext.lineTo(x, y);
+        }
+
+        x += sliceWidth;
+    }
+
+    canvasContext.lineTo(graphCanvas2.width, graphCanvas2.height / 2);
+    canvasContext.stroke();
+
+    drawFrequencyDomain(analyser, bufferLength);
+
+    requestAnimationFrame(draw);
+}
+
+audio.addEventListener('loadedmetadata', () => {
+    draw();
+    audio.play();
+});
+}
+
+function drawFrequencyDomain(analyser, bufferLength) {
+frequencyContext.clearRect(0, 0, frequencyCanvas2.width, frequencyCanvas2.height);
+
+const frequencies = new Uint8Array(bufferLength);
+analyser.getByteFrequencyData(frequencies);
+
+const barWidth = (frequencyCanvas2.width / bufferLength) * 2.5;
+let barHeight;
+let x = 0;
+
+for (let i = 0; i < bufferLength; i++) {
+    barHeight = frequencies[i];
+
+    frequencyContext.fillStyle = '#e74c3c'; // Frequency domain color
+    frequencyContext.fillRect(x, frequencyCanvas2.height - barHeight, barWidth, barHeight);
+
+    x += barWidth + 1;
+}
+}
+    });
+</script>
+
+</body>
+</html>
